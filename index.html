@@ -249,7 +249,24 @@ const FONTS = ['Roboto', 'Roboto Flex', 'Roboto Mono', 'Roboto Serif', 'Google S
   'SamsungOne', 'Samsung Sans', 'SECRobotoLight', 'OnePlus Sans', 'MiSans', 'HarmonyOS Sans',
   'Arial', 'Helvetica', 'Helvetica Neue', 'Times New Roman', 'Times', 'Courier New', 'Courier', 'Verdana', 'Georgia', 'Tahoma',
   'Trebuchet MS', 'Comic Sans MS', 'Impact', 'Segoe UI', 'Segoe UI Emoji', 'Calibri', 'Cambria', 'Consolas', 'Candara', 'Arial Black', 'Lucida Console',
-  'Menlo', 'Monaco', 'SF Pro Text', 'Apple Color Emoji', 'Ubuntu', 'DejaVu Sans', 'Liberation Sans', 'Liberation Serif', 'Cantarell', 'Lato', 'Open Sans'];
+  'Menlo', 'Monaco', 'SF Pro Text', 'Apple Color Emoji', 'Ubuntu', 'DejaVu Sans', 'Liberation Sans', 'Liberation Serif', 'Cantarell', 'Lato', 'Open Sans',
+  // Windows: 11 alone has Segoe UI Variable, Segoe Fluent Icons and Cascadia; the rest ship with 10 and 11 or with Office.
+  'Segoe UI Variable Text', 'Segoe UI Variable Display', 'Segoe Fluent Icons', 'Cascadia Code', 'Cascadia Mono', 'Segoe MDL2 Assets', 'HoloLens MDL2 Assets',
+  'Segoe UI Symbol', 'Segoe UI Light', 'Segoe UI Semibold', 'Segoe Print', 'Segoe Script', 'Bahnschrift', 'Ink Free', 'Gabriola', 'Sitka Text',
+  'Franklin Gothic Medium', 'Palatino Linotype', 'Book Antiqua', 'Constantia', 'Corbel', 'Ebrima', 'Gadugi', 'Javanese Text', 'Leelawadee UI',
+  'Malgun Gothic', 'Microsoft Himalaya', 'Microsoft JhengHei', 'Microsoft YaHei', 'Microsoft Sans Serif', 'MS Gothic', 'MV Boli', 'Myanmar Text',
+  'Nirmala UI', 'SimSun', 'Sylfaen', 'Symbol', 'Webdings', 'Wingdings', 'Yu Gothic', 'Lucida Sans Unicode',
+  // FingerprintJS's list.
+  'sans-serif-thin', 'ARNO PRO', 'Agency FB', 'Arabic Typesetting', 'Arial Unicode MS', 'AvantGarde Bk BT', 'BankGothic Md BT', 'Batang',
+  'Bitstream Vera Sans Mono', 'Century', 'Century Gothic', 'Clarendon', 'EUROSTILE', 'Franklin Gothic', 'Futura Bk BT', 'Futura Md BT', 'GOTHAM',
+  'Gill Sans', 'HELV', 'Haettenschweiler', 'Humanst521 BT', 'Leelawadee', 'Letter Gothic', 'Levenim MT', 'Lucida Bright', 'Lucida Sans',
+  'MS Mincho', 'MS Outlook', 'MS Reference Specialty', 'MS UI Gothic', 'MT Extra', 'MYRIAD PRO', 'Marlett', 'Meiryo UI', 'Microsoft Uighur',
+  'Minion Pro', 'Monotype Corsiva', 'PMingLiU', 'Pristina', 'SCRIPTINA', 'Serifa', 'SimHei', 'Small Fonts', 'Staccato222 BT', 'TRAJAN PRO',
+  'Univers CE 55 Medium', 'Vrinda', 'ZWAdobeF',
+  // macOS and Linux.
+  'Avenir', 'Avenir Next', 'Futura', 'Optima', 'Geneva', 'Lucida Grande', 'PingFang SC', 'Hiragino Sans', 'Apple SD Gothic Neo', 'Baskerville',
+  'Didot', 'American Typewriter', 'Marker Felt', 'Papyrus', 'SF Mono', 'New York', 'Charter',
+  'DejaVu Serif', 'DejaVu Sans Mono', 'Liberation Mono', 'Ubuntu Mono', 'FreeSans', 'Nimbus Sans'];
 const SYSCOLORS = ['Canvas', 'CanvasText', 'ButtonFace', 'ButtonText', 'ButtonBorder', 'Field', 'FieldText', 'Highlight', 'HighlightText',
   'SelectedItem', 'SelectedItemText', 'Mark', 'MarkText', 'LinkText', 'VisitedText', 'ActiveText', 'GrayText', 'AccentColor', 'AccentColorText',
   'ActiveBorder', 'ButtonHighlight', 'ButtonShadow', 'Menu', 'Scrollbar', 'Window', 'WindowText'];
@@ -375,6 +392,7 @@ function nativeCheck() {
     'Navigator.requestMediaKeySystemAccess': g(Navigator.prototype, 'requestMediaKeySystemAccess'),
     'speechSynthesis.getVoices': window.SpeechSynthesis && g(SpeechSynthesis.prototype, 'getVoices'),
     'Function.prototype.toString': Function.prototype.toString,
+    'chrome.loadTimes': window.chrome && window.chrome.loadTimes, 'chrome.csi': window.chrome && window.chrome.csi,
   };
   const o = {};
   for (const [k, f] of Object.entries(list)) {
@@ -384,7 +402,11 @@ function nativeCheck() {
   }
   o.navigatorOwnProps = Object.getOwnPropertyNames(navigator);
   o.navigatorProtoIsNavigator = Object.getPrototypeOf(navigator) === Navigator.prototype;
-  o.windowChrome = window.chrome ? Object.fromEntries(Object.keys(window.chrome).map(k => [k, typeof window.chrome[k]])) : null;
+  const c = window.chrome;
+  o.windowChrome = c ? Object.fromEntries(Object.keys(c).map(k => [k, c[k] && typeof c[k] === 'object' ? Object.keys(c[k]).sort() : typeof c[k]])) : null;
+  const keysOf = f => { try { return typeof f === 'function' ? Object.keys(f()).sort() : 'absent'; } catch (e) { return errStr(e); } };
+  o.chromeCalls = c ? { loadTimes: keysOf(c.loadTimes), csi: keysOf(c.csi),
+    app: (() => { try { return c.app ? plain({ details: c.app.getDetails(), isInstalled: c.app.isInstalled, InstallState: c.app.InstallState, RunningState: c.app.RunningState }) : 'absent'; } catch (e) { return errStr(e); } })() } : null;
   return o;
 }
 async function apisInfo() {
@@ -396,7 +418,9 @@ async function apisInfo() {
   o.contactsProperties = await t(() => n.contacts ? n.contacts.getProperties() : 'absent');
   o.relatedApps = await t(() => n.getInstalledRelatedApps ? n.getInstalledRelatedApps().then(plain) : 'absent');
   o.digitalGoods = await t(() => window.getDigitalGoodsService ? window.getDigitalGoodsService('https://play.google.com/billing').then(() => 'service') : 'absent');
-  o.keyboardLayout = await t(() => n.keyboard ? n.keyboard.getLayoutMap().then(m => ({ size: m.size, KeyQ: m.get('KeyQ'), IntlBackslash: m.get('IntlBackslash') })) : 'absent');
+  o.keyboardLayout = await t(() => n.keyboard ? n.keyboard.getLayoutMap().then(m => ({ size: m.size, map: Object.fromEntries(Array.from(m).sort()) })) : 'absent');
+  o.plugins = n.plugins ? Array.from(n.plugins, p => ({ name: p.name, filename: p.filename, description: p.description, mimeTypes: Array.from(p, m => m.type) })) : 'absent';
+  o.mimeTypes = n.mimeTypes ? Array.from(n.mimeTypes, m => [m.type, m.suffixes, m.description, m.enabledPlugin && m.enabledPlugin.name]) : 'absent';
   o.xr = await t(async () => n.xr ? { vr: await n.xr.isSessionSupported('immersive-vr'), ar: await n.xr.isSessionSupported('immersive-ar') } : 'absent');
   o.webauthn = await t(async () => window.PublicKeyCredential ? {
     uvpaa: await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(),
@@ -507,7 +531,7 @@ function screenInfo() {
 
 async function collect() {
   const started = performance.now();
-  const r = { schema: 1, at: new Date().toISOString() };
+  const r = { schema: 2, at: new Date().toISOString() };
   r.context = {
     href: location.href.replace(/[?#].*$/, ''), isTop: window === window.top, isSecureContext, crossOriginIsolated,
     ancestorOrigins: location.ancestorOrigins ? Array.from(location.ancestorOrigins) : null,
@@ -565,7 +589,22 @@ function fileName() {
   const label = (h.model || (result.ua.uaData && result.ua.uaData.platform) || 'device').replace(/[^\p{L}\p{N}._-]+/gu, '-').slice(0, 40);
   return 'probe-' + label + '-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '') + '.json';
 }
+// The button's own events: a real mouse has screenX = clientX + window.screenX + browser chrome, a touch has its contact size.
+const EVENT_KEYS = ['type', 'isTrusted', 'pointerType', 'pointerId', 'isPrimary', 'button', 'buttons', 'detail', 'pressure', 'tangentialPressure',
+  'width', 'height', 'tiltX', 'tiltY', 'twist', 'altitudeAngle', 'azimuthAngle', 'screenX', 'screenY', 'clientX', 'clientY', 'pageX', 'pageY',
+  'offsetX', 'offsetY', 'x', 'y', 'movementX', 'movementY', 'timeStamp'];
+const input = {};
+const record = e => {
+  const o = Object.fromEntries(EVENT_KEYS.map(k => [k, e[k]]));
+  o.class = e.constructor.name;
+  const tc = e.touches && e.touches[0];
+  if (tc) o.touch = { count: e.touches.length, screen: [tc.screenX, tc.screenY], client: [tc.clientX, tc.clientY], radius: [tc.radiusX, tc.radiusY], force: tc.force, rotationAngle: tc.rotationAngle, touchType: tc.touchType };
+  o.window = { screenXY: [screenX, screenY], outer: [outerWidth, outerHeight], inner: [innerWidth, innerHeight], dpr: devicePixelRatio };
+  input[e.type] = o;
+};
+for (const type of ['pointerdown', 'mousedown', 'touchstart', 'click']) $('save').addEventListener(type, record);
 $('save').addEventListener('click', () => {
+  result.input = input;
   const url = URL.createObjectURL(new Blob([JSON.stringify(result)], { type: 'application/json' }));
   const a = document.createElement('a');
   a.href = url; a.download = fileName();
