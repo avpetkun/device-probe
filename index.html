@@ -441,6 +441,8 @@ async function apisInfo() {
     video: RTCRtpReceiver.getCapabilities('video').codecs.map(c => c.mimeType + (c.sdpFmtpLine ? ';' + c.sdpFmtpLine : '')),
     audio: RTCRtpReceiver.getCapabilities('audio').codecs.map(c => c.mimeType),
     senderVideo: RTCRtpSender.getCapabilities('video').codecs.map(c => c.mimeType),
+    senderVideoFull: RTCRtpSender.getCapabilities('video').codecs.map(c => c.mimeType + (c.sdpFmtpLine ? ';' + c.sdpFmtpLine : '') + (c.scalabilityModes ? ' [' + c.scalabilityModes.join(' ') + ']' : '')),
+    senderAudio: RTCRtpSender.getCapabilities('audio').codecs.map(c => c.mimeType + '/' + c.clockRate + '/' + (c.channels || 1) + (c.sdpFmtpLine ? ';' + c.sdpFmtpLine : '')),
   } : 'absent');
   o.stackFormat = (() => { try { null.x; } catch (e) { return e.message; } })();
   return o;
