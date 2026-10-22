@@ -31,7 +31,6 @@ p { margin: 0; color: var(--muted); max-width: 62ch; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; overflow-wrap: anywhere; min-width: 0; }
 .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-label { font-size: 13px; color: var(--muted); }
 input[type=text] { font: 15px var(--sans); padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px;
   background: var(--bg); color: var(--fg); flex: 1 1 220px; min-width: 0; }
 button { font: 600 15px var(--sans); padding: 10px 18px; border-radius: 8px; border: 0; cursor: pointer;
@@ -66,7 +65,6 @@ pre { margin: 8px 0 0; font: 12px/1.45 var(--mono); overflow-x: auto; max-height
 
   <section class="card">
     <div class="row">
-      <input type="text" id="label" placeholder="Например: Pixel 8, Chrome" aria-label="Подпись устройства">
       <button id="save" disabled>Скачать файл</button>
     </div>
     <div class="status" id="status">Снимок собирается, это 5–10 секунд.</div>
@@ -561,12 +559,12 @@ function render(r) {
   }
 }
 function fileName() {
-  const label = ($('label').value.trim() || 'device').replace(/[^\p{L}\p{N}._-]+/gu, '-').slice(0, 40);
+  const h = result.ua.uaHigh || {};
+  const label = (h.model || (result.ua.uaData && result.ua.uaData.platform) || 'device').replace(/[^\p{L}\p{N}._-]+/gu, '-').slice(0, 40);
   return 'probe-' + label + '-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '') + '.json';
 }
 $('save').addEventListener('click', () => {
-  const snapshot = Object.assign({ label: $('label').value.trim() }, result);
-  const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot)], { type: 'application/json' }));
+  const url = URL.createObjectURL(new Blob([JSON.stringify(result)], { type: 'application/json' }));
   const a = document.createElement('a');
   a.href = url; a.download = fileName();
   document.body.appendChild(a); a.click(); a.remove();
@@ -578,7 +576,7 @@ window.__probe.then(r => {
   result = r; render(r);
   if (window.top !== window && /^(127\.0\.0\.1|localhost)$/.test(location.hostname)) parent.postMessage({ probe: r }, '*');
   $('save').disabled = false;
-  setStatus('Снимок готов. Подпишите устройство и скачайте файл.');
+  setStatus('Снимок готов. Скачайте файл и перешлите его тому, кто дал ссылку.');
 }, e => setStatus('Сбор упал: ' + errStr(e), true));
 </script>
 </body>
