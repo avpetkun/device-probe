@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Сверка отпечатка</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* One column: what this device is, one button, then the raw snapshot by section. */
+:root {
+  --bg: #f5f7f6; --surface: #ffffff; --fg: #17201c; --muted: #5d6b65;
+  --line: #d7dfdb; --accent: #0b7a55; --accent-fg: #ffffff; --warn: #a15c00;
+  --sans: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111614; --surface: #19201d; --fg: #e3ebe7; --muted: #93a39c;
+  --line: #2c3632; --accent: #3fc493; --accent-fg: #07130e; --warn: #f0a640; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #111614; --surface: #19201d; --fg: #e3ebe7; --muted: #93a39c;
+  --line: #2c3632; --accent: #3fc493; --accent-fg: #07130e; --warn: #f0a640; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--sans);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: max(24px, env(safe-area-inset-top, 0px)) max(48px, env(safe-area-inset-bottom, 0px)); }
+main { max-width: 760px; margin: 0 auto; display: grid; gap: 20px; }
+h1 { font-size: 24px; font-weight: 600; margin: 0; text-wrap: balance; }
+p { margin: 0; color: var(--muted); max-width: 62ch; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 12px; min-width: 0; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font: 13px/1.45 var(--mono); }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; overflow-wrap: anywhere; min-width: 0; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+label { font-size: 13px; color: var(--muted); }
+input[type=text] { font: 15px var(--sans); padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg); color: var(--fg); flex: 1 1 220px; min-width: 0; }
+button { font: 600 15px var(--sans); padding: 10px 18px; border-radius: 8px; border: 0; cursor: pointer;
+  background: var(--accent); color: var(--accent-fg); }
+button:disabled { opacity: .5; cursor: default; }
+button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+textarea { font: 11px/1.4 var(--mono); width: 100%; height: 120px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg); color: var(--fg); padding: 8px; box-sizing: border-box; }
+button:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.status { font: 13px var(--mono); color: var(--muted); }
+.status.warn { color: var(--warn); }
+.runs { display: grid; gap: 6px; font: 13px/1.4 var(--mono); }
+.runs .run { display: grid; grid-template-columns: 1fr max-content; gap: 10px; border-top: 1px solid var(--line); padding-top: 6px; }
+.runs .run span:last-child { color: var(--muted); }
+details { border-top: 1px solid var(--line); padding-top: 8px; }
+summary { cursor: pointer; font: 500 13px var(--mono); letter-spacing: .02em; }
+summary small { color: var(--muted); font-weight: 400; }
+pre { margin: 8px 0 0; font: 12px/1.45 var(--mono); overflow-x: auto; max-height: 420px; background: var(--bg);
+  border-radius: 6px; padding: 10px; white-space: pre; }
+</style>
+</head>
+<body>
+<main>
+  <header style="display:grid;gap:6px">
+    <h1>Сверка отпечатка</h1>
+    <p>Страница снимает всё, что сайты читают об устройстве: браузер, экран, графику, звук, медиа, датчики и доступные API. Ничего не запрашивает: ни камеры, ни геопозиции, ни уведомлений, и никуда ничего не отправляет. Снимок сохраняется файлом, его нужно переслать тому, кто дал ссылку.</p>
+  </header>
+
+  <section class="card">
+    <dl class="kv" id="summary"><dt>статус</dt><dd>собираю…</dd></dl>
+  </section>
+
+  <section class="card">
+    <div class="row">
+      <input type="text" id="label" placeholder="Например: Pixel 8, Chrome" aria-label="Подпись устройства">
+      <button id="save" disabled>Скачать файл</button>
+    </div>
+    <div class="status" id="status">Снимок собирается, это 5–10 секунд.</div>
+  </section>
+
+  <section class="card" id="sections"><div class="status">Здесь появятся разделы снимка.</div></section>
+</main>
+
+<script>
+// ── helpers, shared with the worker by source ──────────────────────────────
+function errStr(e) { return e && e.name ? e.name + ': ' + e.message : String(e); }
+async function t(fn, ms) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(fn),
+      new Promise(r => { timer = setTimeout(() => r({ timeout: ms || 3000 }), ms || 3000); }),
+    ]);
+  } catch (e) { return { error: errStr(e) }; } finally { clearTimeout(timer); }
+}
+function plain(v) {
+  if (v == null || typeof v !== 'object') return v;
+  if (ArrayBuffer.isView(v)) return Array.from(v);
+  if (Array.isArray(v)) return v.map(plain);
+  const o = {};
+  for (const k in v) { try { const x = v[k]; if (typeof x !== 'function') o[k] = plain(x); } catch (e) { o[k] = { error: errStr(e) }; } }
+  return o;
+}
+async function sha(s) {
+  const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return Array.from(new Uint8Array(b).slice(0, 8), x => x.toString(16).padStart(2, '0')).join('');
+}
+async function uaInfo(nav) {
+  const o = {
+    userAgent: nav.userAgent, appVersion: nav.appVersion, platform: nav.platform, vendor: nav.vendor,
+    product: nav.product, productSub: nav.productSub, language: nav.language, languages: nav.languages && Array.from(nav.languages),
+    hardwareConcurrency: nav.hardwareConcurrency, deviceMemory: nav.deviceMemory, onLine: nav.onLine,
+    webdriver: nav.webdriver, maxTouchPoints: nav.maxTouchPoints, doNotTrack: nav.doNotTrack,
+    cookieEnabled: nav.cookieEnabled, pdfViewerEnabled: nav.pdfViewerEnabled,
+  };
+  if (nav.userAgentData) {
+    o.uaData = { brands: plain(nav.userAgentData.brands), mobile: nav.userAgentData.mobile, platform: nav.userAgentData.platform };
+    o.uaHigh = await t(() => nav.userAgentData.getHighEntropyValues(
+      ['architecture', 'bitness', 'formFactors', 'fullVersionList', 'model', 'platformVersion', 'uaFullVersion', 'wow64']).then(plain));
+  } else o.uaData = null;
+  const c = nav.connection;
+  o.connection = c ? { type: c.type, effectiveType: c.effectiveType, downlink: c.downlink, downlinkMax: c.downlinkMax, rtt: c.rtt, saveData: c.saveData } : null;
+  o.intl = Intl.DateTimeFormat().resolvedOptions();
+  o.tzOffset = new Date().getTimezoneOffset();
+  o.dateString = new Date(2026, 0, 15, 12).toString();
+  o.numberFormat = Intl.NumberFormat().resolvedOptions();
+  o.toLocale = (1234567.891).toLocaleString();
+  return o;
+}
+function glInfo(gl) {
+  if (!gl) return null;
+  const o = {};
+  const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+  o.vendor = gl.getParameter(gl.VENDOR); o.renderer = gl.getParameter(gl.RENDERER);
+  o.version = gl.getParameter(gl.VERSION); o.shadingLanguage = gl.getParameter(gl.SHADING_LANGUAGE_VERSION);
+  o.unmaskedVendor = dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : null;
+  o.unmaskedRenderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : null;
+  o.extensions = gl.getSupportedExtensions();
+  o.contextAttributes = gl.getContextAttributes();
+  const params = {};
+  for (const k in gl) {
+    if (!/^(MAX_|ALIASED_|SUBPIXEL_BITS$|SAMPLES$|SAMPLE_BUFFERS$|(RED|GREEN|BLUE|ALPHA|DEPTH|STENCIL)_BITS$|IMPLEMENTATION_COLOR_READ|MIN_PROGRAM_TEXEL|UNIFORM_BUFFER_OFFSET)/.test(k)) continue;
+    try { params[k] = plain(gl.getParameter(gl[k])); } catch (e) { params[k] = { error: errStr(e) }; }
+  }
+  o.params = params;
+  const prec = {};
+  for (const sh of ['VERTEX_SHADER', 'FRAGMENT_SHADER'])
+    for (const p of ['LOW_FLOAT', 'MEDIUM_FLOAT', 'HIGH_FLOAT', 'LOW_INT', 'MEDIUM_INT', 'HIGH_INT']) {
+      const f = gl.getShaderPrecisionFormat(gl[sh], gl[p]);
+      prec[sh[0] + '.' + p] = f ? [f.rangeMin, f.rangeMax, f.precision] : null;
+    }
+  o.precision = prec;
+  return o;
+}
+function glAll(make) {
+  const o = {};
+  for (const kind of ['webgl', 'webgl2']) {
+    try { o[kind] = glInfo(make().getContext(kind)); } catch (e) { o[kind] = { error: errStr(e) }; }
+  }
+  try { o.caveat = !!make().getContext('webgl', { failIfMajorPerformanceCaveat: true }); } catch (e) { o.caveat = errStr(e); }
+  return o;
+}
+async function gpuInfo(nav) {
+  if (!nav.gpu) return null;
+  const o = { preferredFormat: nav.gpu.getPreferredCanvasFormat ? nav.gpu.getPreferredCanvasFormat() : null };
+  o.wgslLanguageFeatures = nav.gpu.wgslLanguageFeatures ? Array.from(nav.gpu.wgslLanguageFeatures).sort() : null;
+  const a = await nav.gpu.requestAdapter();
+  if (!a) { o.adapter = null; return o; }
+  o.info = plain(a.info);
+  o.isFallbackAdapter = a.isFallbackAdapter;
+  o.features = Array.from(a.features).sort();
+  o.limits = plain(a.limits);
+  const hp = await t(() => nav.gpu.requestAdapter({ powerPreference: 'high-performance' }).then(x => x && plain(x.info)));
+  o.highPerformanceInfo = hp;
+  return o;
+}
+const MIMES = [
+  'video/mp4; codecs="avc1.42E01E"', 'video/mp4; codecs="avc1.64001F"', 'video/mp4; codecs="hev1.1.6.L93.B0"',
+  'video/mp4; codecs="hvc1.1.6.L93.B0"', 'video/mp4; codecs="vp09.00.10.08"', 'video/mp4; codecs="av01.0.05M.08"',
+  'video/mp4; codecs="dvh1.05.06"', 'video/webm; codecs="vp8"', 'video/webm; codecs="vp9"', 'video/webm; codecs="av01.0.05M.08"',
+  'video/ogg; codecs="theora"', 'video/x-matroska', 'video/quicktime', 'video/3gpp', 'video/mp2t',
+  'application/vnd.apple.mpegurl', 'application/x-mpegURL', 'application/dash+xml',
+  'audio/mp4; codecs="mp4a.40.2"', 'audio/mp4; codecs="mp4a.40.5"', 'audio/mp4; codecs="opus"', 'audio/mp4; codecs="flac"',
+  'audio/mp4; codecs="ac-3"', 'audio/mp4; codecs="ec-3"', 'audio/mpeg', 'audio/aac', 'audio/flac', 'audio/wav',
+  'audio/ogg; codecs="vorbis"', 'audio/ogg; codecs="opus"', 'audio/webm; codecs="opus"', 'audio/x-m4a', 'audio/amr',
+];
+const DECODE = {
+  h264: 'video/mp4; codecs="avc1.640028"', vp9: 'video/webm; codecs="vp09.00.40.08"',
+  av1: 'video/mp4; codecs="av01.0.08M.08"', hevc: 'video/mp4; codecs="hvc1.1.6.L120.90"',
+};
+async function mediaInfo(scope, inWorker) {
+  const o = {};
+  if (scope.MediaSource) { o.mse = {}; for (const m of MIMES) o.mse[m] = scope.MediaSource.isTypeSupported(m); }
+  if (scope.ManagedMediaSource) o.managedMediaSource = true;
+  if (scope.navigator.mediaCapabilities) {
+    o.decodingInfo = {};
+    for (const type of inWorker ? ['media-source'] : ['file', 'media-source'])
+      for (const [k, ct] of Object.entries(DECODE))
+        o.decodingInfo[type + ':' + k] = await t(() => scope.navigator.mediaCapabilities.decodingInfo(
+          { type, video: { contentType: ct, width: 1920, height: 1080, bitrate: 4e6, framerate: 30 } })
+          .then(r => [r.supported, r.smooth, r.powerEfficient]));
+  }
+  if (scope.VideoDecoder) {
+    o.webcodecs = {};
+    for (const [k, codec] of Object.entries({ h264: 'avc1.640028', vp9: 'vp09.00.40.08', av1: 'av01.0.08M.08', hevc: 'hvc1.1.6.L120.90', vp8: 'vp8' })) {
+      o.webcodecs['dec:' + k] = await t(() => scope.VideoDecoder.isConfigSupported({ codec, codedWidth: 1920, codedHeight: 1080 }).then(r => r.supported));
+      o.webcodecs['enc:' + k] = await t(() => scope.VideoEncoder.isConfigSupported({ codec, width: 1280, height: 720, bitrate: 2e6 }).then(r => r.supported));
+    }
+    for (const codec of ['mp4a.40.2', 'opus', 'flac', 'mp3'])
+      o.webcodecs['adec:' + codec] = await t(() => scope.AudioDecoder.isConfigSupported({ codec, sampleRate: 48000, numberOfChannels: 2 }).then(r => r.supported));
+  }
+  return o;
+}
+
+// ── worker ────────────────────────────────────────────────────────────────
+async function workerScope() {
+  const o = {};
+  o.ua = await uaInfo(self.navigator);
+  o.gl = typeof OffscreenCanvas === 'function' ? glAll(() => new OffscreenCanvas(16, 16)) : null;
+  if (o.gl) for (const k of ['webgl', 'webgl2']) if (o.gl[k] && o.gl[k].params) o.gl[k].paramsHash = await sha(JSON.stringify(o.gl[k].params) + JSON.stringify(o.gl[k].precision));
+  o.gpu = await t(() => gpuInfo(self.navigator), 5000);
+  o.media = await mediaInfo(self, true);
+  o.globals = Object.getOwnPropertyNames(self).sort();
+  o.navigatorKeys = (() => { const k = []; for (const x in self.navigator) k.push(x); return k.sort(); })();
+  return o;
+}
+function runWorker() {
+  const src = [errStr, t, plain, sha, uaInfo, glInfo, glAll, gpuInfo, mediaInfo, workerScope].map(f => f.toString()).join('\n') +
+    '\nconst MIMES=' + JSON.stringify(MIMES) + ';const DECODE=' + JSON.stringify(DECODE) +
+    ';\nworkerScope().then(r => postMessage(r), e => postMessage({ error: errStr(e) }));';
+  return new Promise(res => {
+    const w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+    w.onmessage = e => { res(e.data); w.terminate(); };
+    w.onerror = e => res({ error: e.message || 'worker error' });
+  });
+}
+
+// ── the page ──────────────────────────────────────────────────────────────
+const MQ = {
+  pointer: ['none', 'coarse', 'fine'], 'any-pointer': ['none', 'coarse', 'fine'], hover: ['none', 'hover'], 'any-hover': ['none', 'hover'],
+  'color-gamut': ['srgb', 'p3', 'rec2020'], 'dynamic-range': ['standard', 'high'], 'video-dynamic-range': ['standard', 'high'],
+  'prefers-color-scheme': ['light', 'dark'], 'prefers-reduced-motion': ['no-preference', 'reduce'],
+  'prefers-reduced-transparency': ['no-preference', 'reduce'], 'prefers-contrast': ['no-preference', 'more', 'less', 'custom'],
+  'forced-colors': ['none', 'active'], 'inverted-colors': ['none', 'inverted'], 'display-mode': ['browser', 'standalone', 'minimal-ui', 'fullscreen', 'picture-in-picture', 'window-controls-overlay'],
+  update: ['none', 'slow', 'fast'], scripting: ['none', 'initial-only', 'enabled'], 'overflow-block': ['none', 'scroll', 'paged'],
+  orientation: ['portrait', 'landscape'], monochrome: [''], 'device-posture': ['continuous', 'folded'], 'prefers-reduced-data': ['no-preference', 'reduce'],
+};
+const PERMS = ['accelerometer', 'ambient-light-sensor', 'background-fetch', 'background-sync', 'bluetooth', 'camera',
+  'captured-surface-control', 'clipboard-read', 'clipboard-write', 'display-capture', 'fullscreen', 'geolocation', 'gyroscope',
+  'handtracking', 'idle-detection', 'keyboard-lock', 'local-fonts', 'magnetometer', 'microphone', 'midi', 'nfc', 'notifications',
+  'payment-handler', 'periodic-background-sync', 'persistent-storage', 'pointer-lock', 'push', 'screen-wake-lock',
+  'speaker-selection', 'storage-access', 'system-wake-lock', 'top-level-storage-access', 'web-app-installation',
+  'window-management', 'xr-spatial-tracking'];
+const FONTS = ['Roboto', 'Roboto Flex', 'Roboto Mono', 'Roboto Serif', 'Google Sans', 'Google Sans Text', 'Product Sans', 'Noto Sans', 'Noto Serif',
+  'Noto Sans Mono', 'Noto Color Emoji', 'Noto Sans CJK SC', 'Noto Sans Devanagari', 'Noto Sans Arabic', 'Noto Naskh Arabic', 'Noto Sans Hebrew', 'Noto Sans Thai',
+  'Droid Sans', 'Droid Serif', 'Droid Sans Mono', 'Cutive Mono', 'Coming Soon', 'Dancing Script', 'Carrois Gothic SC', 'Source Sans Pro',
+  'SamsungOne', 'Samsung Sans', 'SECRobotoLight', 'OnePlus Sans', 'MiSans', 'HarmonyOS Sans',
+  'Arial', 'Helvetica', 'Helvetica Neue', 'Times New Roman', 'Times', 'Courier New', 'Courier', 'Verdana', 'Georgia', 'Tahoma',
+  'Trebuchet MS', 'Comic Sans MS', 'Impact', 'Segoe UI', 'Segoe UI Emoji', 'Calibri', 'Cambria', 'Consolas', 'Candara', 'Arial Black', 'Lucida Console',
+  'Menlo', 'Monaco', 'SF Pro Text', 'Apple Color Emoji', 'Ubuntu', 'DejaVu Sans', 'Liberation Sans', 'Liberation Serif', 'Cantarell', 'Lato', 'Open Sans'];
+const SYSCOLORS = ['Canvas', 'CanvasText', 'ButtonFace', 'ButtonText', 'ButtonBorder', 'Field', 'FieldText', 'Highlight', 'HighlightText',
+  'SelectedItem', 'SelectedItemText', 'Mark', 'MarkText', 'LinkText', 'VisitedText', 'ActiveText', 'GrayText', 'AccentColor', 'AccentColorText',
+  'ActiveBorder', 'ButtonHighlight', 'ButtonShadow', 'Menu', 'Scrollbar', 'Window', 'WindowText'];
+
+function sandbox() {
+  const f = document.createElement('iframe');
+  f.style.cssText = 'position:absolute;left:-9999px;width:300px;height:150px;border:0';
+  document.body.appendChild(f);
+  return f;
+}
+function widthOf(ctx, family, base) {
+  ctx.font = '72px "' + family + '", ' + base;
+  return ctx.measureText('mmmmmmmmmmlli WQ@ 0123 ąßж文あ').width;
+}
+async function canvasInfo() {
+  const o = {};
+  const c = document.createElement('canvas'); c.width = 280; c.height = 80;
+  const x = c.getContext('2d');
+  x.textBaseline = 'top'; x.font = '18px sans-serif'; x.fillStyle = '#f60'; x.fillRect(100, 1, 62, 20);
+  x.fillStyle = '#069'; x.fillText('Cwm fjordbank glyphs vext quiz, 😃', 2, 15);
+  x.fillStyle = 'rgba(102,204,0,0.7)'; x.font = '20px serif'; x.fillText('Отпечаток ✓ 文字', 4, 45);
+  const d1 = c.toDataURL(), d2 = c.toDataURL();
+  o.hash = await sha(d1); o.stableWithinPage = d1 === d2;
+  const e = document.createElement('canvas'); e.width = 120; e.height = 60;
+  const ex = e.getContext('2d'); ex.font = '40px sans-serif'; ex.fillText('😀🫠🇺🇦', 0, 44);
+  o.emojiHash = await sha(e.toDataURL());
+  o.emojiWidth = ex.measureText('😀').width;
+  const m = document.createElement('canvas').getContext('2d');
+  o.generic = {};
+  for (const g of ['sans-serif', 'serif', 'monospace', 'cursive', 'fantasy', 'system-ui', 'ui-sans-serif', 'ui-serif', 'ui-monospace', 'ui-rounded', 'emoji', 'math', 'fangsong'])
+    { m.font = '72px ' + g; o.generic[g] = Math.round(m.measureText('mmmmmmmmmmlli WQ@ 0123').width * 100) / 100; }
+  o.fonts = FONTS.filter(f => ['monospace', 'serif', 'sans-serif'].some(b => widthOf(m, f, b) !== widthOf(m, 'no-such-font-xyz', b)));
+  return o;
+}
+function audioInfo() {
+  return t(async () => {
+    const o = {};
+    const ac = new AudioContext();
+    o.sampleRate = ac.sampleRate; o.baseLatency = ac.baseLatency; o.outputLatency = ac.outputLatency; o.state = ac.state;
+    o.maxChannelCount = ac.destination.maxChannelCount; o.channelCount = ac.destination.channelCount;
+    o.sinkId = 'sinkId' in ac ? String(ac.sinkId) : undefined;
+    ac.close();
+    const oc = new OfflineAudioContext(1, 5000, 44100);
+    const osc = oc.createOscillator(); osc.type = 'triangle'; osc.frequency.value = 10000;
+    const cmp = oc.createDynamicsCompressor();
+    cmp.threshold.value = -50; cmp.knee.value = 40; cmp.ratio.value = 12; cmp.attack.value = 0; cmp.release.value = 0.25;
+    osc.connect(cmp); cmp.connect(oc.destination); osc.start(0);
+    const buf = await oc.startRendering();
+    let s = 0; const ch = buf.getChannelData(0); for (let i = 4500; i < 5000; i++) s += Math.abs(ch[i]);
+    o.offlineSum = s;
+    return o;
+  }, 4000);
+}
+async function emeInfo() {
+  if (!navigator.requestMediaKeySystemAccess) return null;
+  const o = {};
+  const rob = ['', 'SW_SECURE_CRYPTO', 'SW_SECURE_DECODE', 'HW_SECURE_CRYPTO', 'HW_SECURE_DECODE', 'HW_SECURE_ALL'];
+  for (const ks of ['com.widevine.alpha', 'org.w3.clearkey', 'com.microsoft.playready', 'com.microsoft.playready.recommendation', 'com.apple.fps']) {
+    o[ks] = await t(async () => {
+      const a = await navigator.requestMediaKeySystemAccess(ks, [{
+        initDataTypes: ['cenc'], distinctiveIdentifier: 'optional', persistentState: 'optional', sessionTypes: ['temporary'],
+        audioCapabilities: [{ contentType: 'audio/mp4; codecs="mp4a.40.2"' }],
+        videoCapabilities: rob.map(r => ({ contentType: 'video/mp4; codecs="avc1.42E01E"', robustness: r })),
+      }]);
+      const r = { config: plain(a.getConfiguration()) };
+      r.persistentLicense = await t(() => navigator.requestMediaKeySystemAccess(ks, [{ initDataTypes: ['cenc'], sessionTypes: ['persistent-license'],
+        videoCapabilities: [{ contentType: 'video/mp4; codecs="avc1.42E01E"' }] }]).then(() => true));
+      r.createMediaKeys = await t(() => a.createMediaKeys().then(() => true));
+      return r;
+    });
+  }
+  return o;
+}
+function voicesInfo() {
+  return t(() => new Promise(res => {
+    if (!window.speechSynthesis) return res(null);
+    const done = () => res(speechSynthesis.getVoices().map(v => [v.name, v.lang, v.localService, v.default, v.voiceURI]));
+    if (speechSynthesis.getVoices().length) return done();
+    speechSynthesis.addEventListener('voiceschanged', done, { once: true });
+    setTimeout(done, 2500);
+  }), 3000);
+}
+function motionInfo() {
+  return t(() => new Promise(res => {
+    const o = { motion: [], orientation: [] };
+    const round = v => typeof v === 'number' ? Math.round(v * 1000) / 1000 : v;
+    const onM = e => { if (o.motion.length < 4) o.motion.push({ t: Math.round(e.timeStamp), interval: e.interval,
+      acc: e.acceleration && [round(e.acceleration.x), round(e.acceleration.y), round(e.acceleration.z)],
+      accG: e.accelerationIncludingGravity && [round(e.accelerationIncludingGravity.x), round(e.accelerationIncludingGravity.y), round(e.accelerationIncludingGravity.z)],
+      rot: e.rotationRate && [round(e.rotationRate.alpha), round(e.rotationRate.beta), round(e.rotationRate.gamma)] }); o.motionCount = (o.motionCount || 0) + 1; };
+    const onO = e => { if (o.orientation.length < 3) o.orientation.push({ abs: e.absolute, a: round(e.alpha), b: round(e.beta), g: round(e.gamma) }); o.orientationCount = (o.orientationCount || 0) + 1; };
+    addEventListener('devicemotion', onM); addEventListener('deviceorientation', onO);
+    setTimeout(() => { removeEventListener('devicemotion', onM); removeEventListener('deviceorientation', onO); res(o); }, 1500);
+  }), 2500);
+}
+function genericSensor() {
+  const o = {};
+  const one = name => t(() => new Promise(res => {
+    if (typeof window[name] !== 'function') return res('absent');
+    const s = new window[name]({ frequency: 10 });
+    s.onreading = () => { res({ reading: [s.x, s.y, s.z, s.quaternion].map(v => typeof v === 'number' ? Math.round(v * 1000) / 1000 : v) }); s.stop(); };
+    s.onerror = e => { res({ error: errStr(e.error) }); s.stop(); };
+    s.start();
+  }), 1500);
+  return Promise.all(['Accelerometer', 'LinearAccelerationSensor', 'GravitySensor', 'Gyroscope', 'AbsoluteOrientationSensor', 'RelativeOrientationSensor', 'Magnetometer', 'AmbientLightSensor']
+    .map(async n => { o[n] = await one(n); })).then(() => o);
+}
+function nativeCheck() {
+  const g = (proto, k) => { const d = Object.getOwnPropertyDescriptor(proto, k); return d && (d.get || d.value); };
+  const list = {
+    'Navigator.userAgent': g(Navigator.prototype, 'userAgent'), 'Navigator.platform': g(Navigator.prototype, 'platform'),
+    'Navigator.hardwareConcurrency': g(Navigator.prototype, 'hardwareConcurrency'), 'Navigator.deviceMemory': g(Navigator.prototype, 'deviceMemory'),
+    'Navigator.getBattery': g(Navigator.prototype, 'getBattery'), 'Navigator.languages': g(Navigator.prototype, 'languages'),
+    'Navigator.webdriver': g(Navigator.prototype, 'webdriver'), 'Navigator.plugins': g(Navigator.prototype, 'plugins'),
+    'Screen.width': g(Screen.prototype, 'width'), 'HTMLCanvasElement.toDataURL': g(HTMLCanvasElement.prototype, 'toDataURL'),
+    'CanvasRenderingContext2D.getImageData': g(CanvasRenderingContext2D.prototype, 'getImageData'),
+    'WebGLRenderingContext.getParameter': g(WebGLRenderingContext.prototype, 'getParameter'),
+    'Permissions.query': window.Permissions && g(Permissions.prototype, 'query'), 'Date.getTimezoneOffset': Date.prototype.getTimezoneOffset,
+    'Intl.DateTimeFormat.resolvedOptions': Intl.DateTimeFormat.prototype.resolvedOptions,
+    'MediaSource.isTypeSupported': window.MediaSource && MediaSource.isTypeSupported,
+    'HTMLMediaElement.canPlayType': HTMLMediaElement.prototype.canPlayType,
+    'MediaCapabilities.decodingInfo': window.MediaCapabilities && g(MediaCapabilities.prototype, 'decodingInfo'),
+    'Navigator.requestMediaKeySystemAccess': g(Navigator.prototype, 'requestMediaKeySystemAccess'),
+    'speechSynthesis.getVoices': window.SpeechSynthesis && g(SpeechSynthesis.prototype, 'getVoices'),
+    'Function.prototype.toString': Function.prototype.toString,
+  };
+  const o = {};
+  for (const [k, f] of Object.entries(list)) {
+    if (typeof f !== 'function') { o[k] = f === undefined ? 'absent' : typeof f; continue; }
+    const s = Function.prototype.toString.call(f);
+    o[k] = /\{\s*\[native code\]\s*\}$/.test(s) ? 'native' : s.slice(0, 120);
+  }
+  o.navigatorOwnProps = Object.getOwnPropertyNames(navigator);
+  o.navigatorProtoIsNavigator = Object.getPrototypeOf(navigator) === Navigator.prototype;
+  o.windowChrome = window.chrome ? Object.fromEntries(Object.keys(window.chrome).map(k => [k, typeof window.chrome[k]])) : null;
+  return o;
+}
+async function apisInfo() {
+  const n = navigator, o = {};
+  o.battery = await t(() => n.getBattery().then(b => ({ level: b.level, charging: b.charging, chargingTime: b.chargingTime, dischargingTime: b.dischargingTime })));
+  o.barcodeFormats = await t(() => window.BarcodeDetector ? BarcodeDetector.getSupportedFormats() : 'absent');
+  o.shareCanShare = n.canShare ? { text: n.canShare({ text: 'x' }), url: n.canShare({ url: 'https://example.com' }), files: n.canShare({ files: [] }) } : 'absent';
+  o.bluetoothAvailable = await t(() => n.bluetooth ? n.bluetooth.getAvailability() : 'absent');
+  o.contactsProperties = await t(() => n.contacts ? n.contacts.getProperties() : 'absent');
+  o.relatedApps = await t(() => n.getInstalledRelatedApps ? n.getInstalledRelatedApps().then(plain) : 'absent');
+  o.digitalGoods = await t(() => window.getDigitalGoodsService ? window.getDigitalGoodsService('https://play.google.com/billing').then(() => 'service') : 'absent');
+  o.keyboardLayout = await t(() => n.keyboard ? n.keyboard.getLayoutMap().then(m => ({ size: m.size, KeyQ: m.get('KeyQ'), IntlBackslash: m.get('IntlBackslash') })) : 'absent');
+  o.xr = await t(async () => n.xr ? { vr: await n.xr.isSessionSupported('immersive-vr'), ar: await n.xr.isSessionSupported('immersive-ar') } : 'absent');
+  o.webauthn = await t(async () => window.PublicKeyCredential ? {
+    uvpaa: await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(),
+    conditional: PublicKeyCredential.isConditionalMediationAvailable ? await PublicKeyCredential.isConditionalMediationAvailable() : 'absent',
+    capabilities: PublicKeyCredential.getClientCapabilities ? await PublicKeyCredential.getClientCapabilities() : 'absent',
+  } : 'absent');
+  o.storage = await t(async () => ({ estimate: plain(await n.storage.estimate()), persisted: await n.storage.persisted() }));
+  o.mediaDevices = await t(async () => n.mediaDevices ? {
+    devices: (await n.mediaDevices.enumerateDevices()).map(d => [d.kind, !!d.deviceId, d.label]),
+    constraints: Object.keys(n.mediaDevices.getSupportedConstraints()).sort(),
+    getDisplayMedia: typeof n.mediaDevices.getDisplayMedia,
+  } : 'absent');
+  o.notification = window.Notification ? { permission: Notification.permission, maxActions: Notification.maxActions,
+    construct: (() => { try { new Notification('x'); return 'ok'; } catch (e) { return errStr(e); } })() } : 'absent';
+  o.ai = {};
+  for (const k of ['LanguageModel', 'Summarizer', 'Writer', 'Rewriter', 'Translator', 'LanguageDetector', 'Proofreader'])
+    o.ai[k] = await t(() => window[k] ? (k === 'Translator' ? window[k].availability({ sourceLanguage: 'en', targetLanguage: 'de' }) : window[k].availability()) : 'absent');
+  o.memory = performance.memory ? { jsHeapSizeLimit: performance.memory.jsHeapSizeLimit, totalJSHeapSize: performance.memory.totalJSHeapSize, usedJSHeapSize: performance.memory.usedJSHeapSize } : null;
+  o.gamepads = n.getGamepads ? Array.from(n.getGamepads()).length : 'absent';
+  o.paymentRequest = await t(() => window.PaymentRequest ? new PaymentRequest([{ supportedMethods: 'https://google.com/pay' }], { total: { label: 'x', amount: { currency: 'USD', value: '1' } } }).canMakePayment() : 'absent');
+  o.spc = await t(() => window.PaymentRequest && PaymentRequest.isSecurePaymentConfirmationAvailable ? PaymentRequest.isSecurePaymentConfirmationAvailable() : 'absent');
+  // The options are read before the permission is asked, so a frame without geolocation or a decided permission shows it with no prompt.
+  o.geolocationAccuracyMode = await t(async () => {
+    const blocked = document.featurePolicy && !document.featurePolicy.allowsFeature('geolocation');
+    const state = blocked ? 'blocked' : (await n.permissions.query({ name: 'geolocation' })).state;
+    if (state === 'prompt') return 'skipped: would prompt';
+    let read = false;
+    n.geolocation.getCurrentPosition(() => {}, () => {}, { get accuracyMode() { read = true; return undefined; }, timeout: 0, maximumAge: Infinity });
+    return { state, read };
+  });
+  o.userActivation = n.userActivation ? { hasBeenActive: n.userActivation.hasBeenActive } : 'absent';
+  o.virtualKeyboard = n.virtualKeyboard ? 'present' : 'absent';
+  o.windowControlsOverlay = n.windowControlsOverlay ? 'present' : 'absent';
+  o.errors = {
+    keyboardLock: await t(() => n.permissions.query({ name: 'keyboard-lock' }).then(s => s.state)),
+    localFonts: await t(() => n.permissions.query({ name: 'local-fonts' }).then(s => s.state)),
+    pushNoOpts: await t(() => n.permissions.query({ name: 'push' }).then(s => s.state)),
+    pushVisible: await t(() => n.permissions.query({ name: 'push', userVisibleOnly: true }).then(s => s.state)),
+    cameraPtz: await t(() => n.permissions.query({ name: 'camera', panTiltZoom: true }).then(s => s.state)),
+  };
+  o.rtc = await t(() => window.RTCRtpReceiver ? {
+    video: RTCRtpReceiver.getCapabilities('video').codecs.map(c => c.mimeType + (c.sdpFmtpLine ? ';' + c.sdpFmtpLine : '')),
+    audio: RTCRtpReceiver.getCapabilities('audio').codecs.map(c => c.mimeType),
+    senderVideo: RTCRtpSender.getCapabilities('video').codecs.map(c => c.mimeType),
+  } : 'absent');
+  o.stackFormat = (() => { try { null.x; } catch (e) { return e.message; } })();
+  return o;
+}
+function styleInfo() {
+  const o = {};
+  const host = document.createElement('div'); host.style.cssText = 'position:absolute;left:-9999px;top:0';
+  host.innerHTML = '<select id="s"><option>a</option></select><button id="b">b</button><input id="i"><input id="c" type="checkbox"><input id="r" type="range"><input id="d" type="date"><textarea id="ta"></textarea><progress id="p"></progress><meter id="m" value=".5"></meter><div id="sb" style="width:100px;height:100px;overflow:scroll"></div><span id="sc"></span>';
+  document.body.appendChild(host);
+  const pick = (el, props) => { const cs = getComputedStyle(el); return Object.fromEntries(props.map(p => [p, cs.getPropertyValue(p)])); };
+  const P = ['background-color', 'color', 'border-top', 'border-radius', 'font-family', 'font-size', 'padding-top', 'padding-left', 'height', 'width', 'appearance'];
+  for (const id of ['s', 'b', 'i', 'c', 'r', 'd', 'ta', 'p', 'm']) o[id] = pick(host.querySelector('#' + id), P);
+  const sb = host.querySelector('#sb'); o.scrollbar = [sb.offsetWidth - sb.clientWidth, sb.offsetHeight - sb.clientHeight];
+  const sc = host.querySelector('#sc'); o.systemColors = {};
+  for (const c of SYSCOLORS) { sc.style.color = ''; sc.style.color = c; o.systemColors[c] = sc.style.color ? getComputedStyle(sc).color : 'unsupported'; }
+  o.bodyFont = getComputedStyle(document.body).fontFamily;
+  o.defaultFontSize = getComputedStyle(document.documentElement).fontSize;
+  o.cssPropertyCount = getComputedStyle(document.documentElement).length;
+  o.cssProperties = Array.from(getComputedStyle(document.documentElement)).sort();
+  o.supports = Object.fromEntries(['accent-color: auto', 'field-sizing: content', 'interpolate-size: allow-keywords', 'text-size-adjust: none',
+    '-webkit-text-size-adjust: none', 'zoom: 1', 'anchor-name: --a', 'scrollbar-width: thin', 'reading-flow: normal', 'appearance: base-select',
+    'color: AccentColor', 'font-family: system-ui', 'touch-action: manipulation', 'overscroll-behavior: contain', 'view-transition-name: a',
+    'corner-shape: squircle', 'text-box: trim-both cap alphabetic', 'scroll-marker-group: after'].map(s => [s, CSS.supports(s)]));
+  host.remove();
+  return o;
+}
+function frameInfo() {
+  // about:blank, not srcdoc: a same-origin child that inherits the page's process, as a site's own iframe does.
+  return t(() => {
+    const f = sandbox(); const w = f.contentWindow;
+    const o = { platform: w.navigator.platform, userAgent: w.navigator.userAgent === navigator.userAgent, cores: w.navigator.hardwareConcurrency,
+      memory: w.navigator.deviceMemory, touch: w.navigator.maxTouchPoints, pointer: w.matchMedia('(pointer: coarse)').matches,
+      orientation: w.screen.orientation && [w.screen.orientation.type, w.screen.orientation.angle], windowOrientation: w.orientation,
+      screen: [w.screen.width, w.screen.height], dpr: w.devicePixelRatio, uaPlatform: w.navigator.userAgentData && w.navigator.userAgentData.platform,
+      glRenderer: (() => { const g = w.document.createElement('canvas').getContext('webgl'); const d = g && g.getExtension('WEBGL_debug_renderer_info'); return d && g.getParameter(d.UNMASKED_RENDERER_WEBGL); })() };
+    f.remove();
+    return o;
+  });
+}
+async function permsInfo() {
+  const o = {};
+  for (const name of PERMS) o[name] = await t(() => navigator.permissions.query({ name }).then(s => s.state), 1500);
+  return o;
+}
+function screenInfo() {
+  const s = screen, o = {};
+  for (const k of ['width', 'height', 'availWidth', 'availHeight', 'availLeft', 'availTop', 'colorDepth', 'pixelDepth', 'isExtended']) o[k] = s[k];
+  o.orientation = s.orientation ? [s.orientation.type, s.orientation.angle] : null;
+  o.windowOrientation = window.orientation;
+  o.dpr = devicePixelRatio;
+  o.inner = [innerWidth, innerHeight]; o.outer = [outerWidth, outerHeight]; o.screenXY = [screenX, screenY];
+  o.client = [document.documentElement.clientWidth, document.documentElement.clientHeight];
+  o.visualViewport = visualViewport ? [visualViewport.width, visualViewport.height, visualViewport.scale, visualViewport.offsetTop] : null;
+  o.mq = {};
+  for (const [f, vals] of Object.entries(MQ)) {
+    const hit = vals.filter(v => matchMedia('(' + f + (v ? ': ' + v : '') + ')').matches);
+    o.mq[f] = matchMedia('(' + f + ')').media === 'not all' ? 'unknown' : hit.join('|') || '-';
+  }
+  o.mq.deviceSize = ['(max-device-width: 480px)', '(min-resolution: 2dppx)', '(min-resolution: 3dppx)', '(-webkit-min-device-pixel-ratio: 2)'].map(q => matchMedia(q).matches);
+  return o;
+}
+
+async function collect() {
+  const started = performance.now();
+  const r = { schema: 1, at: new Date().toISOString() };
+  r.context = {
+    href: location.href.replace(/[?#].*$/, ''), isTop: window === window.top, isSecureContext, crossOriginIsolated,
+    ancestorOrigins: location.ancestorOrigins ? Array.from(location.ancestorOrigins) : null,
+    allowedFeatures: document.featurePolicy ? document.featurePolicy.allowedFeatures().sort() : null,
+    visibility: document.visibilityState, hasFocus: document.hasFocus(),
+  };
+  const [ua, worker, motion, sensors, voices, audio, eme, gpu, perms, apis] = await Promise.all([
+    uaInfo(navigator), t(runWorker, 15000), motionInfo(), genericSensor(), voicesInfo(), audioInfo(), t(emeInfo, 8000),
+    t(() => gpuInfo(navigator), 5000), permsInfo(), apisInfo(),
+  ]);
+  r.ua = ua; r.screen = screenInfo(); r.style = styleInfo();
+  r.gl = glAll(() => document.createElement('canvas'));
+  for (const k of ['webgl', 'webgl2']) if (r.gl[k] && r.gl[k].params) r.gl[k].paramsHash = await sha(JSON.stringify(r.gl[k].params) + JSON.stringify(r.gl[k].precision));
+  r.gpu = gpu; r.canvas = await t(canvasInfo, 5000); r.audio = audio; r.voices = voices;
+  r.media = { canPlayType: Object.fromEntries(MIMES.map(m => [m, document.createElement('video').canPlayType(m)])), ...await mediaInfo(window, false) };
+  r.media.mediaRecorder = window.MediaRecorder ? Object.fromEntries(['video/webm', 'video/webm;codecs=vp9', 'video/webm;codecs=h264', 'video/mp4', 'video/mp4;codecs=avc1', 'audio/webm', 'audio/mp4'].map(m => [m, MediaRecorder.isTypeSupported(m)])) : 'absent';
+  r.eme = eme; r.motion = motion; r.sensors = sensors; r.permissions = perms; r.apis = apis;
+  r.native = nativeCheck(); r.frame = await frameInfo(); r.worker = worker;
+  const own = new Set(['__probe', 'collect', 'MQ', 'PERMS', 'FONTS', 'SYSCOLORS', 'MIMES', 'DECODE']);
+  const pageOwn = k => { try { const v = window[k]; return typeof v === 'function' && /^[a-z]/.test(k) && !/\{\s*\[native code\]/.test(Function.prototype.toString.call(v)); } catch (e) { return false; } };
+  r.globals = Object.getOwnPropertyNames(window).filter(k => !own.has(k) && !pageOwn(k)).sort();
+  r.navigatorKeys = (() => { const k = []; for (const x in navigator) k.push(x); return k.sort(); })();
+  r.tookMs = Math.round(performance.now() - started);
+  return r;
+}
+
+// ── the UI ────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+window.__probe = collect();
+let result = null;
+
+function setStatus(text, warn) { $('status').textContent = text; $('status').className = 'status' + (warn ? ' warn' : ''); }
+function render(r) {
+  const s = $('summary'); s.textContent = '';
+  const add = (k, v) => { const dt = document.createElement('dt'); dt.textContent = k; const dd = document.createElement('dd'); dd.textContent = v; s.append(dt, dd); };
+  add('UA', r.ua.userAgent);
+  const h = r.ua.uaHigh || {};
+  add('модель', (h.model || '—') + ' · ' + (r.ua.uaData ? r.ua.uaData.platform : '—') + ' ' + (h.platformVersion || ''));
+  add('экран', r.screen.width + '×' + r.screen.height + ' @' + r.screen.dpr + ' · ' + (r.screen.orientation || []).join(' '));
+  add('GPU', (r.gl.webgl && r.gl.webgl.unmaskedRenderer) || '—');
+  add('ядра · память', r.ua.hardwareConcurrency + ' · ' + r.ua.deviceMemory + ' ГБ');
+  add('собрано за', r.tookMs + ' мс');
+  const box = $('sections'); box.textContent = '';
+  for (const [k, v] of Object.entries(r)) {
+    if (typeof v !== 'object' || v === null) continue;
+    const d = document.createElement('details'); const sm = document.createElement('summary');
+    const json = JSON.stringify(v, null, 1);
+    sm.textContent = k + ' '; const small = document.createElement('small'); small.textContent = (json.length / 1024).toFixed(1) + ' КБ'; sm.append(small);
+    const pre = document.createElement('pre'); pre.textContent = json;
+    d.append(sm, pre); box.append(d);
+  }
+}
+function fileName() {
+  const label = ($('label').value.trim() || 'device').replace(/[^\p{L}\p{N}._-]+/gu, '-').slice(0, 40);
+  return 'probe-' + label + '-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '') + '.json';
+}
+$('save').addEventListener('click', () => {
+  const snapshot = Object.assign({ label: $('label').value.trim() }, result);
+  const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot)], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = fileName();
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  setStatus('Файл ' + a.download + ' сохранён в загрузки. Перешлите его файлом тому, кто дал ссылку.');
+});
+
+window.__probe.then(r => {
+  result = r; render(r);
+  if (window.top !== window && /^(127\.0\.0\.1|localhost)$/.test(location.hostname)) parent.postMessage({ probe: r }, '*');
+  $('save').disabled = false;
+  setStatus('Снимок готов. Подпишите устройство и скачайте файл.');
+}, e => setStatus('Сбор упал: ' + errStr(e), true));
+</script>
+</body>
+</html>
